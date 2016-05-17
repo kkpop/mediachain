@@ -1,9 +1,10 @@
 package io.mediachain.client
 
-import cats.data.XorT
-import io.mediachain.protocol.Datastore.{JournalEntry, _}
+
+
+import io.mediachain.copycat.Client.ClientStateListener
+import io.mediachain.protocol.Datastore.Datastore
 import io.mediachain.protocol.Transactor.JournalListener
-import io.mediachain.transactor.Copycat.{ClientState, ClientStateListener}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -12,7 +13,10 @@ class MediachainCopycatClient(datastore: Datastore)
   (implicit executionContext: ExecutionContext = ExecutionContext.global)
   extends MediachainClient with JournalListener with ClientStateListener
 {
-  import io.mediachain.transactor.Copycat
+  import cats.data.XorT
+  import io.mediachain.copycat
+  import io.mediachain.copycat.Client.ClientState
+  import io.mediachain.protocol.Datastore._
 
   def allCanonicalReferences = canonicalRefs
 
@@ -72,7 +76,7 @@ class MediachainCopycatClient(datastore: Datastore)
   var canonicalRefs: Set[Reference] = Set()
   var clusterClientState: ClientState = ClientState.Disconnected
 
-  val cluster = Copycat.Client.build()
+  val cluster = copycat.Client.build()
   cluster.listen(this)
   cluster.addStateListener(this)
 
