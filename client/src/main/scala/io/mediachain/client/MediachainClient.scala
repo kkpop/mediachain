@@ -1,6 +1,6 @@
 package io.mediachain.client
 
-import cats.data.XorT
+import cats.data.{Streaming, XorT}
 import io.mediachain.protocol.Datastore._
 import io.mediachain.protocol.Transactor.JournalError
 
@@ -35,7 +35,7 @@ trait MediachainClient {
   /**
     * @return the set of References to all known CanonicalRecords
     */
-  def allCanonicalReferences: Set[Reference]
+  def allCanonicalReferences: Streaming[Reference]
 
   /**
     * @param ref a Reference to a CanonicalRecord

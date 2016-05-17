@@ -13,12 +13,13 @@ class MediachainCopycatClient(datastore: Datastore)
   (implicit executionContext: ExecutionContext = ExecutionContext.global)
   extends MediachainClient with JournalListener with ClientStateListener
 {
-  import cats.data.XorT
+  import cats.data.{Streaming, XorT}
   import io.mediachain.copycat
   import io.mediachain.copycat.Client.ClientState
   import io.mediachain.protocol.Datastore._
 
-  def allCanonicalReferences = canonicalRefs
+  // TODO: lazy streaming implementation
+  def allCanonicalReferences = Streaming.fromIterable(canonicalRefs)
 
   def chainForCanonical(ref: Reference): Future[Option[Reference]] = {
     // TODO: handle disconnected cluster state
