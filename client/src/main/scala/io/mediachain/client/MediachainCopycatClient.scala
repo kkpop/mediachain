@@ -1,7 +1,5 @@
 package io.mediachain.client
 
-
-
 import io.mediachain.copycat.Client.ClientStateListener
 import io.mediachain.protocol.Datastore.Datastore
 import io.mediachain.protocol.Transactor.JournalListener
@@ -17,6 +15,8 @@ class MediachainCopycatClient(datastore: Datastore)
   import io.mediachain.copycat
   import io.mediachain.copycat.Client.ClientState
   import io.mediachain.protocol.Datastore._
+  import io.mediachain.protocol.MediachainError
+
 
   // TODO: lazy streaming implementation
   def allCanonicalReferences = Streaming.fromIterable(canonicalRefs)
@@ -39,9 +39,12 @@ class MediachainCopycatClient(datastore: Datastore)
     *         Reference to the new record
     */
   def addCanonical(canonicalRecord: CanonicalRecord) =
-    XorT[Future, ClientError, Reference] {
+    XorT[Future, MediachainError, Reference] {
       cluster.insert(canonicalRecord)
-        .map(_.bimap(ClientError.Journal, _.ref))
+        .map(_.bimap(
+          err => MediachainError.Journal(err),
+          entry => entry.ref
+        ))
     }
 
   /**
@@ -53,9 +56,12 @@ class MediachainCopycatClient(datastore: Datastore)
     *         or a Reference to the new head of the record's chain
     */
   def updateCanonical(canonicalReference: Reference, chainCell: ChainCell) =
-    XorT[Future, ClientError, Reference] {
+    XorT[Future, MediachainError, Reference] {
       cluster.update(canonicalReference, chainCell)
-        .map(_.bimap(ClientError.Journal, _.chain))
+        .map(_.bimap(
+          err => MediachainError.Journal(err),
+          entry => entry.chain
+        ))
     }
 
   /**

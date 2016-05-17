@@ -2,7 +2,7 @@ package io.mediachain.client
 
 import cats.data.{Streaming, XorT}
 import io.mediachain.protocol.Datastore._
-import io.mediachain.protocol.Transactor.JournalError
+import io.mediachain.protocol.MediachainError
 
 import scala.concurrent.Future
 
@@ -18,12 +18,6 @@ trait ClientEventListener {
 }
 
 
-sealed trait ClientError
-object ClientError {
-  case class NetworkError(cause: Throwable) extends ClientError
-  case class Journal(journalError: JournalError) extends ClientError
-}
-
 
 // wrapper around copycat client interface
 // so far only the low-level interface is defined, and only References to
@@ -33,7 +27,7 @@ object ClientError {
 trait MediachainClient {
 
   /**
-    * @return the set of References to all known CanonicalRecords
+    * @return a stream containing References to all known CanonicalRecords.
     */
   def allCanonicalReferences: Streaming[Reference]
 
@@ -61,7 +55,7 @@ trait MediachainClient {
     * @return an Xor-wrapped future that will complete with either a ClientError
     *         or a Reference to the new record
     */
-  def addCanonical(canonicalRecord: CanonicalRecord): XorT[Future, ClientError, Reference]
+  def addCanonical(canonicalRecord: CanonicalRecord): XorT[Future, MediachainError, Reference]
 
 
   /**
@@ -73,7 +67,7 @@ trait MediachainClient {
     *         or a Reference to the new head of the record's chain
     */
   def updateCanonical(canonicalReference: Reference, chainCell: ChainCell)
-  : XorT[Future, ClientError, Reference]
+  : XorT[Future, MediachainError, Reference]
 }
 
 
