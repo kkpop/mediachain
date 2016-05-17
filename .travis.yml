@@ -5,6 +5,7 @@ jdk:
   - oraclejdk8
 env:
   - SBT_TARGET=transactor
+  - SBT_TARGET=client
   - SBT_TARGET=l_space
   - SBT_TARGET=translation_engine
   - SBT_TARGET=protocol
