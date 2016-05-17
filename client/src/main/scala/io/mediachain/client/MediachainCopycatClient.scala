@@ -1,28 +1,40 @@
 package io.mediachain.client
 
+
+import java.util.concurrent.Executors
+
 import io.mediachain.copycat.Client.ClientStateListener
 import io.mediachain.protocol.Datastore.Datastore
 import io.mediachain.protocol.Transactor.JournalListener
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 
 
 class MediachainCopycatClient(datastore: Datastore)
   (implicit executionContext: ExecutionContext = ExecutionContext.global)
   extends MediachainClient with JournalListener with ClientStateListener
 {
+  import java.util.concurrent.LinkedBlockingQueue
+
   import cats.data.{Streaming, XorT}
   import io.mediachain.copycat
   import io.mediachain.copycat.Client.ClientState
   import io.mediachain.protocol.Datastore._
   import io.mediachain.protocol.MediachainError
 
+  import collection.JavaConverters._
+  import scala.collection.concurrent.{Map => ConcurrentMap}
+  import scala.concurrent.Future
 
-  // TODO: lazy streaming implementation
-  def allCanonicalReferences = Streaming.fromIterable(canonicalRefs)
+
+  def allCanonicalReferences =  {
+    // FIXME - this should pull from the set of known blocks and
+    // return references from their CanonicalEntries.
+
+    Streaming.empty
+  }
 
   def chainForCanonical(ref: Reference): Future[Option[Reference]] = {
-    // TODO: handle disconnected cluster state
     cluster.lookup(ref)
   }
 
@@ -71,6 +83,8 @@ class MediachainCopycatClient(datastore: Datastore)
     */
   def connect(address: String) = {
     cluster.connect(address)
+    cluster.listen(this)
+    catchupWorkerExecutor.submit(new BlockCatchupWorker(catchupBlockReferenceQueue))
   }
 
   /**
@@ -80,11 +94,46 @@ class MediachainCopycatClient(datastore: Datastore)
 
 
   var listeners: Set[ClientEventListener] = Set()
-  var canonicalRefs: Set[Reference] = Set()
-  var clusterClientState: ClientState = ClientState.Disconnected
+  val knownBlocks: ConcurrentMap[BigInt, Reference] =
+    new java.util.concurrent.ConcurrentHashMap[BigInt, Reference]().asScala
 
+  @volatile var clusterClientState: ClientState = ClientState.Disconnected
+
+
+  // when following the chain backwards, block references are placed on this
+  // queue.  A worker thread pulls the blocks from the datastore.  If we've not
+  // previously seen this block, it adds the block to the `knownBlocks` map,
+  // then checks its `chain` reference.  If the `chain` reference is defined,
+  // it adds that reference to the queue, and the process repeats until
+  // we hit a block we've already processed, or a block with a nil `chain`
+  // reference (the genesis block)
+  val catchupBlockReferenceQueue: LinkedBlockingQueue[Reference] = new LinkedBlockingQueue()
+
+
+  class BlockCatchupWorker(refQueue: LinkedBlockingQueue[Reference]) extends Runnable {
+    override def run(): Unit = {
+      while (MediachainCopycatClient.this.clusterClientState == ClientState.Connected) {
+        val ref = refQueue.take()
+
+        val block = datastore.getAs[JournalBlock](ref)
+          .getOrElse(
+            throw new RuntimeException(s"Unable to retrieve block with ref $ref")
+          )
+
+        knownBlocks.synchronized {
+          if (!knownBlocks.contains(block.index)) {
+
+            knownBlocks.put(block.index, ref)
+            block.chain.foreach(refQueue.put)
+          }
+        }
+      }
+    }
+  }
+
+
+  val catchupWorkerExecutor = Executors.newSingleThreadExecutor()
   val cluster = copycat.Client.build()
-  cluster.listen(this)
   cluster.addStateListener(this)
 
   /**
@@ -107,49 +156,17 @@ class MediachainCopycatClient(datastore: Datastore)
     * any missing blocks from the blockchain.
     */
   def catchupJournal(): Unit = {
-    // Note that we don't set the `latestBlockIndex` to the index of the
-    // current block, since the current block is still in the process of
-    // being constructed by the transactor cluster.
     cluster.currentBlock.map { block =>
-      block.entries.foreach(handleJournalEntry)
-      block.chain.foreach(retrieveBlock)
+      block.chain.foreach { prevBlockRef =>
+        catchupBlockReferenceQueue.put(prevBlockRef)
+      }
     }
   }
 
-  /**
-    * Retrieve a block from the datastore and process it
-    *
-    * @param blockRef reference to a `JournalBlock`
-    */
-  private def retrieveBlock(blockRef: Reference): Unit = {
-    val block = datastore.getAs[JournalBlock](blockRef)
-      .getOrElse(
-        // TODO: better failure handling
-        throw new RuntimeException(s"Unable to fetch block with ref: $blockRef")
-      )
-    handleBlock(block)
-  }
 
-  private var latestBlockIndex: BigInt = -1
 
-  /**
-    * Handle each journal entry in the given `block`. If it's newer than
-    * the most recently seen block, follow its `chain` backwards until
-    * we're caught up.
-    *
-    * @param block a `JournalBlock` to handle
-    */
-  private def handleBlock(block: JournalBlock): Unit = {
-    block.entries.foreach(handleJournalEntry)
-
-    if (block.index > latestBlockIndex) {
-      block.chain.foreach(retrieveBlock)
-      latestBlockIndex = block.index
-    }
-  }
 
   private def handleJournalEntry(entry: JournalEntry): Unit = {
-    canonicalRefs += entry.ref
   }
 
 
@@ -161,7 +178,8 @@ class MediachainCopycatClient(datastore: Datastore)
     handleJournalEntry(entry)
 
   override def onJournalBlock(ref: Reference): Unit = {
-    // TODO: handle failure when fetching block from datastore
-    datastore.getAs[JournalBlock](ref).foreach(handleBlock)
+    Future {
+      catchupBlockReferenceQueue.put(ref)
+    }
   }
 }
