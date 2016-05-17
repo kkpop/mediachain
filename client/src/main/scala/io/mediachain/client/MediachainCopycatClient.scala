@@ -81,7 +81,7 @@ class MediachainCopycatClient(datastore: Datastore)
     *
     * @param address address to connect to
     */
-  def connect(address: String) = {
+  def connect(address: String): Unit = {
     cluster.connect(address)
     cluster.listen(this)
     catchupWorkerExecutor.submit(new BlockCatchupWorker(catchupBlockReferenceQueue))
@@ -112,7 +112,7 @@ class MediachainCopycatClient(datastore: Datastore)
 
   class BlockCatchupWorker(refQueue: LinkedBlockingQueue[Reference]) extends Runnable {
     override def run(): Unit = {
-      while (MediachainCopycatClient.this.clusterClientState == ClientState.Connected) {
+      while (true) {
         val ref = refQueue.take()
 
         val block = datastore.getAs[JournalBlock](ref)
@@ -146,7 +146,7 @@ class MediachainCopycatClient(datastore: Datastore)
     clusterClientState = state
 
     state match {
-      case Connected => catchupJournal()
+      case Connected => ()//catchupJournal()
       case _ => ()
     }
   }
@@ -158,12 +158,12 @@ class MediachainCopycatClient(datastore: Datastore)
   def catchupJournal(): Unit = {
     cluster.currentBlock.map { block =>
       block.chain.foreach { prevBlockRef =>
-        catchupBlockReferenceQueue.put(prevBlockRef)
+        Future {
+          catchupBlockReferenceQueue.put(prevBlockRef)
+        }
       }
     }
   }
-
-
 
 
   private def handleJournalEntry(entry: JournalEntry): Unit = {
